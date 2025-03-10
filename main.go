@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"io/ioutil"
 	"log"
@@ -17,9 +18,11 @@ import (
 
 // Configuration for the application
 type Config struct {
-	NotionAPIToken   string
-	NotionDatabaseID string
-	OutputDir        string
+	NotionAPIToken        string
+	NotionBlogDatabaseID  string
+	NotionDiaryDatabaseID string
+	OutputDir             string
+	DatabaseType          string // "blog" or "diary"
 }
 
 // Frontmatter for Astro templates
@@ -92,6 +95,10 @@ func generateFilename(page notionapi.Page) string {
 }
 
 func main() {
+	// Define command-line flags
+	dbType := flag.String("type", "blog", "Database type to process: 'blog' or 'diary'")
+	flag.Parse()
+
 	// Load .env file if it exists
 	if err := godotenv.Load(); err != nil {
 		log.Println("No .env file found, using system environment variables")
@@ -101,17 +108,29 @@ func main() {
 
 	// Get configuration from environment variables
 	config := Config{
-		NotionAPIToken:   getEnv("NOTION_API_TOKEN", ""),
-		NotionDatabaseID: getEnv("NOTION_DATABASE_ID", ""),
-		OutputDir:        getEnv("OUTPUT_DIR", "./content"),
+		NotionAPIToken:        getEnv("NOTION_API_TOKEN", ""),
+		NotionBlogDatabaseID:  getEnv("NOTION_BLOG_DATABASE_ID", ""),
+		NotionDiaryDatabaseID: getEnv("NOTION_DIARY_DATABASE_ID", ""),
+		OutputDir:             getEnv("OUTPUT_DIR", "./content"),
+		DatabaseType:          *dbType,
 	}
 
 	// Validate configuration
 	if config.NotionAPIToken == "" {
 		log.Fatal("NOTION_API_TOKEN environment variable is required")
 	}
-	if config.NotionDatabaseID == "" {
-		log.Fatal("NOTION_DATABASE_ID environment variable is required")
+
+	// Validate database ID based on the selected type
+	if config.DatabaseType == "blog" {
+		if config.NotionBlogDatabaseID == "" {
+			log.Fatal("NOTION_BLOG_DATABASE_ID environment variable is required for blog database")
+		}
+	} else if config.DatabaseType == "diary" {
+		if config.NotionDiaryDatabaseID == "" {
+			log.Fatal("NOTION_DIARY_DATABASE_ID environment variable is required for diary database")
+		}
+	} else {
+		log.Fatalf("Invalid database type: %s. Must be 'blog' or 'diary'", config.DatabaseType)
 	}
 
 	// Create output directory if it doesn't exist
@@ -122,8 +141,18 @@ func main() {
 	// Initialize Notion client
 	client := notionapi.NewClient(notionapi.Token(config.NotionAPIToken))
 
+	// Determine which database ID to use
+	var databaseID string
+	if config.DatabaseType == "blog" {
+		databaseID = config.NotionBlogDatabaseID
+		fmt.Println("Processing blog database...")
+	} else {
+		databaseID = config.NotionDiaryDatabaseID
+		fmt.Println("Processing diary database...")
+	}
+
 	// Fetch database
-	database, err := client.Database.Get(context.Background(), notionapi.DatabaseID(config.NotionDatabaseID))
+	database, err := client.Database.Get(context.Background(), notionapi.DatabaseID(databaseID))
 	if err != nil {
 		log.Fatalf("Failed to get database: %v", err)
 	}
@@ -135,7 +164,7 @@ func main() {
 		PageSize: 100,
 	}
 
-	resp, err := client.Database.Query(context.Background(), notionapi.DatabaseID(config.NotionDatabaseID), query)
+	resp, err := client.Database.Query(context.Background(), notionapi.DatabaseID(databaseID), query)
 	if err != nil {
 		log.Fatalf("Failed to query database: %v", err)
 	}

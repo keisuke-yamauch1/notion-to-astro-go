@@ -6,7 +6,8 @@
 
 - Go 1.24以上
 - Notion APIトークン
-- NotionデータベースID
+- Notionブログデータベース ID
+- Notion日記データベース ID（オプション、日記データベースを使用する場合）
 
 ## インストール
 
@@ -34,7 +35,8 @@ cp .env.example .env
 
 ```
 NOTION_API_TOKEN=your_notion_api_token
-NOTION_DATABASE_ID=your_notion_database_id
+NOTION_BLOG_DATABASE_ID=your_notion_blog_database_id
+NOTION_DIARY_DATABASE_ID=your_notion_diary_database_id
 OUTPUT_DIR=./content  # 出力先ディレクトリ（デフォルトは ./content）
 ```
 
@@ -42,14 +44,27 @@ OUTPUT_DIR=./content  # 出力先ディレクトリ（デフォルトは ./conte
 
 ```bash
 export NOTION_API_TOKEN="your_notion_api_token"
-export NOTION_DATABASE_ID="your_notion_database_id"
+export NOTION_BLOG_DATABASE_ID="your_notion_blog_database_id"
+export NOTION_DIARY_DATABASE_ID="your_notion_diary_database_id"
 export OUTPUT_DIR="./content"  # 出力先ディレクトリ（デフォルトは ./content）
 ```
 
 ### 実行
 
+デフォルトでは、ブログデータベースが処理されます：
+
 ```bash
 go run main.go
+```
+
+特定のデータベースタイプを指定するには、`-type`フラグを使用します：
+
+```bash
+# ブログデータベースを処理する場合
+go run main.go -type blog
+
+# 日記データベースを処理する場合
+go run main.go -type diary
 ```
 
 ## 機能
@@ -109,8 +124,11 @@ draft: false
 ## トラブルシューティング
 
 - `NOTION_API_TOKEN environment variable is required`: NOTION_API_TOKEN環境変数が設定されていません
-- `NOTION_DATABASE_ID environment variable is required`: NOTION_DATABASE_ID環境変数が設定されていません
+- `NOTION_BLOG_DATABASE_ID environment variable is required for blog database`: ブログデータベースを処理する場合、NOTION_BLOG_DATABASE_ID環境変数が設定されていません
+- `NOTION_DIARY_DATABASE_ID environment variable is required for diary database`: 日記データベースを処理する場合、NOTION_DIARY_DATABASE_ID環境変数が設定されていません
+- `Invalid database type: X. Must be 'blog' or 'diary'`: 無効なデータベースタイプが指定されました。'blog'または'diary'を指定してください
 - `Failed to create output directory`: 出力ディレクトリの作成に失敗しました
-- `Failed to fetch articles`: Notionデータベースからの記事の取得に失敗しました
+- `Failed to get database`: Notionデータベースの取得に失敗しました
+- `Failed to query database`: Notionデータベースのクエリに失敗しました
 - `Failed to convert article`: 記事のAstroテンプレートへの変換に失敗しました
 - `Failed to write article to file`: 記事のファイルへの書き込みに失敗しました
