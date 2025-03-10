@@ -441,6 +441,20 @@ func fetchDatabase(config Config) (*notionapi.Client, []notionapi.Page) {
 	// Query database for pages
 	query := &notionapi.DatabaseQueryRequest{
 		PageSize: 100,
+		Filter: notionapi.AndCompoundFilter{
+			notionapi.PropertyFilter{
+				Property: "published",
+				Checkbox: &notionapi.CheckboxFilterCondition{
+					DoesNotEqual: true, // published が false のデータ
+				},
+			},
+			notionapi.PropertyFilter{
+				Property: "done",
+				Checkbox: &notionapi.CheckboxFilterCondition{
+					Equals: true, // done が true のデータ
+				},
+			},
+		},
 	}
 
 	resp, err := client.Database.Query(context.Background(), notionapi.DatabaseID(databaseID), query)
