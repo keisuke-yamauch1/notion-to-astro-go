@@ -54,6 +54,87 @@ func extractRichText(richText []notionapi.RichText) string {
 	return text.String()
 }
 
+// retrievePageContent retrieves the content of a Notion page and converts it to markdown
+func retrievePageContent(client *notionapi.Client, pageID notionapi.ObjectID) (string, error) {
+	// Get the children blocks of the page
+	resp, err := client.Block.GetChildren(context.Background(), notionapi.BlockID(pageID), nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to retrieve page content: %v", err)
+	}
+
+	// Convert blocks to markdown
+	var markdown strings.Builder
+	for _, block := range resp.Results {
+		// Process each block based on its type
+		blockType := block.GetType()
+
+		switch blockType {
+		case "paragraph":
+			if paragraph, ok := block.(*notionapi.ParagraphBlock); ok {
+				text := extractRichText(paragraph.Paragraph.RichText)
+				markdown.WriteString(text + "\n\n")
+			}
+		case "heading_1":
+			if heading, ok := block.(*notionapi.Heading1Block); ok {
+				text := extractRichText(heading.Heading1.RichText)
+				markdown.WriteString("# " + text + "\n\n")
+			}
+		case "heading_2":
+			if heading, ok := block.(*notionapi.Heading2Block); ok {
+				text := extractRichText(heading.Heading2.RichText)
+				markdown.WriteString("## " + text + "\n\n")
+			}
+		case "heading_3":
+			if heading, ok := block.(*notionapi.Heading3Block); ok {
+				text := extractRichText(heading.Heading3.RichText)
+				markdown.WriteString("### " + text + "\n\n")
+			}
+		case "bulleted_list_item":
+			if item, ok := block.(*notionapi.BulletedListItemBlock); ok {
+				text := extractRichText(item.BulletedListItem.RichText)
+				markdown.WriteString("- " + text + "\n")
+			}
+		case "numbered_list_item":
+			if item, ok := block.(*notionapi.NumberedListItemBlock); ok {
+				text := extractRichText(item.NumberedListItem.RichText)
+				markdown.WriteString("1. " + text + "\n")
+			}
+		case "to_do":
+			if todo, ok := block.(*notionapi.ToDoBlock); ok {
+				text := extractRichText(todo.ToDo.RichText)
+				if todo.ToDo.Checked {
+					markdown.WriteString("- [x] " + text + "\n")
+				} else {
+					markdown.WriteString("- [ ] " + text + "\n")
+				}
+			}
+		case "code":
+			if code, ok := block.(*notionapi.CodeBlock); ok {
+				text := extractRichText(code.Code.RichText)
+				language := string(code.Code.Language)
+				markdown.WriteString("```" + language + "\n" + text + "\n```\n\n")
+			}
+		case "quote":
+			if quote, ok := block.(*notionapi.QuoteBlock); ok {
+				text := extractRichText(quote.Quote.RichText)
+				markdown.WriteString("> " + text + "\n\n")
+			}
+		case "divider":
+			markdown.WriteString("---\n\n")
+		case "image":
+			if image, ok := block.(*notionapi.ImageBlock); ok {
+				if image.Image.Type == "external" {
+					markdown.WriteString("![Image](" + image.Image.External.URL + ")\n\n")
+				} else if image.Image.Type == "file" {
+					markdown.WriteString("![Image](" + image.Image.File.URL + ")\n\n")
+				}
+			}
+		}
+	}
+
+	return markdown.String(), nil
+}
+
 // generateFrontmatterYAML generates YAML frontmatter
 func generateFrontmatterYAML(frontmatter Frontmatter) (string, error) {
 	// Create a custom YAML representation
@@ -269,8 +350,16 @@ func main() {
 			continue
 		}
 
+		// Retrieve page content
+		pageContent, err := retrievePageContent(client, page.ID)
+		if err != nil {
+			log.Printf("Failed to retrieve content for page %s: %v", page.ID, err)
+			// If we can't retrieve the content, use a placeholder
+			pageContent = "This content was imported from Notion, but the content could not be retrieved."
+		}
+
 		// Create content with frontmatter
-		content := fmt.Sprintf("---\n%s---\n\n# %s\n\nThis content was imported from Notion.", frontmatterYAML, title)
+		content := fmt.Sprintf("---\n%s---\n\n%s", frontmatterYAML, pageContent)
 
 		// Save to file
 		filename := generateFilename(page)
