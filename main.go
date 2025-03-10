@@ -20,7 +20,8 @@ type Config struct {
 	NotionAPIToken        string
 	NotionBlogDatabaseID  string
 	NotionDiaryDatabaseID string
-	OutputDir             string
+	BlogOutputDir         string // Output directory for blog content
+	DiaryOutputDir        string // Output directory for diary content
 	DatabaseType          string // "blog" or "diary"
 }
 
@@ -407,24 +408,30 @@ func processPage(client *notionapi.Client, page notionapi.Page, config Config) {
 	// Save to file
 	filename := generateFilename(page)
 
-	// Create subdirectory based on database type
-	var subDir string
+	// Determine the output directory based on database type
+	var outputDir string
 	if config.DatabaseType == "blog" {
-		subDir = "blog"
+		outputDir = config.BlogOutputDir
 	} else if config.DatabaseType == "diary" {
-		subDir = "diary"
+		outputDir = config.DiaryOutputDir
+	} else {
+		// Fallback behavior for unknown database types
+		var subDir string
+		if config.DatabaseType == "blog" {
+			subDir = "blog"
+		} else if config.DatabaseType == "diary" {
+			subDir = "diary"
+		}
+		outputDir = filepath.Join("./content", subDir)
 	}
 
-	// Create the full output directory path
-	fullOutputDir := filepath.Join(config.OutputDir, subDir)
-
 	// Create the directory if it doesn't exist
-	if err := os.MkdirAll(fullOutputDir, 0755); err != nil {
-		log.Printf("Failed to create output directory %s: %v", fullOutputDir, err)
+	if err := os.MkdirAll(outputDir, 0755); err != nil {
+		log.Printf("Failed to create output directory %s: %v", outputDir, err)
 		return
 	}
 
-	outputPath := filepath.Join(fullOutputDir, filename)
+	outputPath := filepath.Join(outputDir, filename)
 	if err := ioutil.WriteFile(outputPath, []byte(content), 0644); err != nil {
 		log.Printf("Failed to write article to file %s: %v", outputPath, err)
 		return
@@ -503,7 +510,8 @@ func loadConfig() Config {
 		NotionAPIToken:        getEnv("NOTION_API_TOKEN", ""),
 		NotionBlogDatabaseID:  getEnv("NOTION_BLOG_DATABASE_ID", ""),
 		NotionDiaryDatabaseID: getEnv("NOTION_DIARY_DATABASE_ID", ""),
-		OutputDir:             getEnv("OUTPUT_DIR", "./content"),
+		BlogOutputDir:         getEnv("BLOG_OUTPUT_DIR", "./content/blog"),
+		DiaryOutputDir:        getEnv("DIARY_OUTPUT_DIR", "./content/diary"),
 		DatabaseType:          *dbType,
 	}
 
@@ -554,9 +562,16 @@ func main() {
 	// Load and validate configuration
 	config := loadConfig()
 
-	// Create output directory if it doesn't exist
-	if err := os.MkdirAll(config.OutputDir, 0755); err != nil {
-		log.Fatalf("Failed to create output directory: %v", err)
+	// Create output directories if they don't exist
+	if config.DatabaseType == "all" || config.DatabaseType == "blog" {
+		if err := os.MkdirAll(config.BlogOutputDir, 0755); err != nil {
+			log.Fatalf("Failed to create blog output directory: %v", err)
+		}
+	}
+	if config.DatabaseType == "all" || config.DatabaseType == "diary" {
+		if err := os.MkdirAll(config.DiaryOutputDir, 0755); err != nil {
+			log.Fatalf("Failed to create diary output directory: %v", err)
+		}
 	}
 
 	if config.DatabaseType == "all" {

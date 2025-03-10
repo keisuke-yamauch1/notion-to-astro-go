@@ -37,7 +37,8 @@ cp .env.example .env
 NOTION_API_TOKEN=your_notion_api_token
 NOTION_BLOG_DATABASE_ID=your_notion_blog_database_id
 NOTION_DIARY_DATABASE_ID=your_notion_diary_database_id
-OUTPUT_DIR=./content  # 出力先ディレクトリ（デフォルトは ./content）
+BLOG_OUTPUT_DIR=./content/blog  # ブログ記事の出力先ディレクトリ
+DIARY_OUTPUT_DIR=./content/diary  # 日記エントリの出力先ディレクトリ
 ```
 
 #### 2. 直接環境変数を設定する方法
@@ -46,7 +47,8 @@ OUTPUT_DIR=./content  # 出力先ディレクトリ（デフォルトは ./conte
 export NOTION_API_TOKEN="your_notion_api_token"
 export NOTION_BLOG_DATABASE_ID="your_notion_blog_database_id"
 export NOTION_DIARY_DATABASE_ID="your_notion_diary_database_id"
-export OUTPUT_DIR="./content"  # 出力先ディレクトリ（デフォルトは ./content）
+export BLOG_OUTPUT_DIR="./content/blog"  # ブログ記事の出力先ディレクトリ
+export DIARY_OUTPUT_DIR="./content/diary"  # 日記エントリの出力先ディレクトリ
 ```
 
 ### 実行
@@ -124,6 +126,8 @@ go run main.go -type diary
 
 ## 出力形式
 
+ブログ記事は `BLOG_OUTPUT_DIR` で指定されたディレクトリに保存され、日記エントリは `DIARY_OUTPUT_DIR` で指定されたディレクトリに保存されます。
+
 ### ブログ記事
 
 ```markdown
@@ -177,7 +181,8 @@ draft: true
 - `NOTION_BLOG_DATABASE_ID environment variable is required for blog database`: ブログデータベースを処理する場合、NOTION_BLOG_DATABASE_ID環境変数が設定されていません
 - `NOTION_DIARY_DATABASE_ID environment variable is required for diary database`: 日記データベースを処理する場合、NOTION_DIARY_DATABASE_ID環境変数が設定されていません
 - `Invalid database type: X. Must be 'blog' or 'diary'`: 無効なデータベースタイプが指定されました。'blog'または'diary'を指定してください
-- `Failed to create output directory`: 出力ディレクトリの作成に失敗しました
+- `Failed to create blog output directory`: ブログ記事の出力ディレクトリの作成に失敗しました
+- `Failed to create diary output directory`: 日記エントリの出力ディレクトリの作成に失敗しました
 - `Failed to get database`: Notionデータベースの取得に失敗しました
 - `Failed to query database`: Notionデータベースのクエリに失敗しました
 - `Failed to convert article`: 記事のAstroテンプレートへの変換に失敗しました
