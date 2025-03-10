@@ -433,19 +433,39 @@ func main() {
 		// Use CreatedTime as the date
 		frontmatter.Date = page.CreatedTime.Format("2006-01-02")
 
-		// Generate frontmatter YAML
-		frontmatterYAML, err := generateFrontmatterYAML(frontmatter)
-		if err != nil {
-			log.Printf("Failed to generate frontmatter for page %s: %v", page.ID, err)
-			continue
-		}
-
 		// Retrieve page content
 		pageContent, err := retrievePageContent(client, page.ID)
 		if err != nil {
 			log.Printf("Failed to retrieve content for page %s: %v", page.ID, err)
 			// If we can't retrieve the content, use a placeholder
 			pageContent = "This content was imported from Notion, but the content could not be retrieved."
+		}
+
+		// For blog entries, set description as first 70 characters of content with newlines converted to spaces
+		if config.DatabaseType == "blog" && pageContent != "" {
+			// Replace newlines with spaces
+			descriptionText := strings.ReplaceAll(pageContent, "\n", " ")
+			// Remove extra spaces
+			descriptionText = regexp.MustCompile(`\s+`).ReplaceAllString(descriptionText, " ")
+			// Trim spaces
+			descriptionText = strings.TrimSpace(descriptionText)
+			// Get first 70 characters or less if content is shorter
+			// Use runes to correctly handle multi-byte characters like Japanese
+			runes := []rune(descriptionText)
+			if len(runes) > 70 {
+				frontmatter.Description = string(runes[:70]) + "..."
+			} else {
+				frontmatter.Description = descriptionText
+			}
+		} else if config.DatabaseType == "blog" {
+			log.Printf("Not setting description for blog entry: %s (empty content)", title)
+		}
+
+		// Generate frontmatter YAML
+		frontmatterYAML, err := generateFrontmatterYAML(frontmatter)
+		if err != nil {
+			log.Printf("Failed to generate frontmatter for page %s: %v", page.ID, err)
+			continue
 		}
 
 		// Create content with frontmatter
