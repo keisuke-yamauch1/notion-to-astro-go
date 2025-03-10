@@ -4,7 +4,6 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"io/ioutil"
 	"log"
 	"os"
 	"path/filepath"
@@ -432,7 +431,7 @@ func processPage(client *notionapi.Client, page notionapi.Page, config Config) {
 	}
 
 	outputPath := filepath.Join(outputDir, filename)
-	if err := ioutil.WriteFile(outputPath, []byte(content), 0644); err != nil {
+	if err := os.WriteFile(outputPath, []byte(content), 0644); err != nil {
 		log.Printf("Failed to write article to file %s: %v", outputPath, err)
 		return
 	}
