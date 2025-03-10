@@ -72,61 +72,61 @@ func retrievePageContent(client *notionapi.Client, pageID notionapi.ObjectID) (s
 		case "paragraph":
 			if paragraph, ok := block.(*notionapi.ParagraphBlock); ok {
 				text := extractRichText(paragraph.Paragraph.RichText)
-				markdown.WriteString(text + "\n\n")
+				markdown.WriteString(text + "  \n\n")
 			}
 		case "heading_1":
 			if heading, ok := block.(*notionapi.Heading1Block); ok {
 				text := extractRichText(heading.Heading1.RichText)
-				markdown.WriteString("# " + text + "\n\n")
+				markdown.WriteString("# " + text + "  \n\n")
 			}
 		case "heading_2":
 			if heading, ok := block.(*notionapi.Heading2Block); ok {
 				text := extractRichText(heading.Heading2.RichText)
-				markdown.WriteString("## " + text + "\n\n")
+				markdown.WriteString("## " + text + "  \n\n")
 			}
 		case "heading_3":
 			if heading, ok := block.(*notionapi.Heading3Block); ok {
 				text := extractRichText(heading.Heading3.RichText)
-				markdown.WriteString("### " + text + "\n\n")
+				markdown.WriteString("### " + text + "  \n\n")
 			}
 		case "bulleted_list_item":
 			if item, ok := block.(*notionapi.BulletedListItemBlock); ok {
 				text := extractRichText(item.BulletedListItem.RichText)
-				markdown.WriteString("- " + text + "\n")
+				markdown.WriteString("- " + text + "  \n")
 			}
 		case "numbered_list_item":
 			if item, ok := block.(*notionapi.NumberedListItemBlock); ok {
 				text := extractRichText(item.NumberedListItem.RichText)
-				markdown.WriteString("1. " + text + "\n")
+				markdown.WriteString("1. " + text + "  \n")
 			}
 		case "to_do":
 			if todo, ok := block.(*notionapi.ToDoBlock); ok {
 				text := extractRichText(todo.ToDo.RichText)
 				if todo.ToDo.Checked {
-					markdown.WriteString("- [x] " + text + "\n")
+					markdown.WriteString("- [x] " + text + "  \n")
 				} else {
-					markdown.WriteString("- [ ] " + text + "\n")
+					markdown.WriteString("- [ ] " + text + "  \n")
 				}
 			}
 		case "code":
 			if code, ok := block.(*notionapi.CodeBlock); ok {
 				text := extractRichText(code.Code.RichText)
 				language := string(code.Code.Language)
-				markdown.WriteString("```" + language + "\n" + text + "\n```\n\n")
+				markdown.WriteString("```" + language + "  \n" + text + "  \n```  \n\n")
 			}
 		case "quote":
 			if quote, ok := block.(*notionapi.QuoteBlock); ok {
 				text := extractRichText(quote.Quote.RichText)
-				markdown.WriteString("> " + text + "\n\n")
+				markdown.WriteString("> " + text + "  \n\n")
 			}
 		case "divider":
-			markdown.WriteString("---\n\n")
+			markdown.WriteString("---  \n\n")
 		case "image":
 			if image, ok := block.(*notionapi.ImageBlock); ok {
 				if image.Image.Type == "external" {
-					markdown.WriteString("![Image](" + image.Image.External.URL + ")\n\n")
+					markdown.WriteString("![Image](" + image.Image.External.URL + ")  \n\n")
 				} else if image.Image.Type == "file" {
-					markdown.WriteString("![Image](" + image.Image.File.URL + ")\n\n")
+					markdown.WriteString("![Image](" + image.Image.File.URL + ")  \n\n")
 				}
 			}
 		}
@@ -181,6 +181,47 @@ func generateFrontmatterYAML(frontmatter Frontmatter) (string, error) {
 	}
 
 	return yamlBuilder.String(), nil
+}
+
+// processEmptyLines processes the content to handle empty lines according to requirements:
+// - Remove single empty lines between sentences
+// - If there are multiple consecutive empty lines, keep just one
+func processEmptyLines(content string) string {
+	// Split content by newline
+	lines := strings.Split(content, "\n")
+
+	// Process lines
+	var result []string
+	emptyLineCount := 0
+
+	for i, line := range lines {
+		trimmedLine := strings.TrimSpace(line)
+
+		if trimmedLine == "" {
+			// This is an empty line
+			emptyLineCount++
+
+			// Skip single empty lines
+			if emptyLineCount == 1 {
+				// Keep the first empty line after frontmatter
+				if i > 0 && strings.TrimSpace(lines[i-1]) == "---" {
+					result = append(result, line)
+				}
+				// Otherwise, skip it
+			} else if emptyLineCount == 2 {
+				// For multiple consecutive empty lines, keep one
+				result = append(result, line)
+			}
+			// Skip any additional empty lines
+		} else {
+			// This is a non-empty line
+			result = append(result, line)
+			emptyLineCount = 0
+		}
+	}
+
+	// Join lines back together
+	return strings.Join(result, "\n")
 }
 
 // generateFilename generates a filename for the article
@@ -360,6 +401,9 @@ func main() {
 
 		// Create content with frontmatter
 		content := fmt.Sprintf("---\n%s---\n\n%s", frontmatterYAML, pageContent)
+
+		// Process empty lines: remove single empty lines, but keep one if there are multiple consecutive empty lines
+		content = processEmptyLines(content)
 
 		// Save to file
 		filename := generateFilename(page)
