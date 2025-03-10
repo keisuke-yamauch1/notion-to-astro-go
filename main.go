@@ -34,6 +34,7 @@ type Frontmatter struct {
 	Date        string   `yaml:"date,omitempty"`
 	Tags        []string `yaml:"tags,omitempty"`
 	Draft       bool     `yaml:"draft,omitempty"`
+	Weather     string   `yaml:"weather,omitempty"`
 }
 
 // getEnv gets an environment variable or returns a default value
@@ -178,6 +179,11 @@ func generateFrontmatterYAML(frontmatter Frontmatter) (string, error) {
 	// Add draft if true
 	if frontmatter.Draft {
 		yamlBuilder.WriteString("draft: true\n")
+	}
+
+	// Add weather if present
+	if frontmatter.Weather != "" {
+		yamlBuilder.WriteString(fmt.Sprintf("weather: %s\n", frontmatter.Weather))
 	}
 
 	return yamlBuilder.String(), nil
@@ -349,6 +355,10 @@ func main() {
 			if tp, ok := titleProp.(*notionapi.TitleProperty); ok && len(tp.Title) > 0 {
 				title = tp.Title[0].PlainText
 			}
+		} else if titleProp, ok := page.Properties["titile"]; ok { // Handle typo in field name
+			if tp, ok := titleProp.(*notionapi.TitleProperty); ok && len(tp.Title) > 0 {
+				title = tp.Title[0].PlainText
+			}
 		}
 
 		if title == "" {
@@ -378,6 +388,23 @@ func main() {
 					tags[i] = tag.Name
 				}
 				frontmatter.Tags = tags
+			}
+		}
+
+		// For diary entries, extract description and weather
+		if config.DatabaseType == "diary" {
+			// Extract description
+			if descProp, ok := page.Properties["description"]; ok {
+				if rtp, ok := descProp.(*notionapi.RichTextProperty); ok && len(rtp.RichText) > 0 {
+					frontmatter.Description = rtp.RichText[0].PlainText
+				}
+			}
+
+			// Extract weather
+			if weatherProp, ok := page.Properties["weather"]; ok {
+				if rtp, ok := weatherProp.(*notionapi.RichTextProperty); ok && len(rtp.RichText) > 0 {
+					frontmatter.Weather = rtp.RichText[0].PlainText
+				}
 			}
 		}
 
