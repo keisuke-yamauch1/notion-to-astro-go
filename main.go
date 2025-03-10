@@ -366,10 +366,32 @@ func main() {
 			continue
 		}
 
-		// Create frontmatter
+		// Create frontmatter with page ID as fallback
 		frontmatter := Frontmatter{
 			ID:    page.ID.String(),
 			Title: title,
+		}
+
+		// Try to get ID from properties (use the ID column value from Notion)
+		var idProp notionapi.Property
+		var ok bool
+
+		// Check for "ID" or "id" property
+		if idProp, ok = page.Properties["ID"]; !ok {
+			idProp, ok = page.Properties["id"]
+		}
+
+		if ok {
+			// Convert the property to string and extract the last part (the actual ID value)
+			idStr := fmt.Sprintf("%v", idProp)
+			parts := strings.Split(idStr, " ")
+			if len(parts) > 0 {
+				// Get the last part and remove any closing brace
+				lastPart := strings.TrimSuffix(parts[len(parts)-1], "}")
+				frontmatter.ID = lastPart
+			} else {
+				frontmatter.ID = idStr
+			}
 		}
 
 		// Extract tags if available
