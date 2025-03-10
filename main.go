@@ -470,7 +470,7 @@ func fetchDatabase(config Config) (*notionapi.Client, []notionapi.Page) {
 // loadConfig loads and validates the application configuration
 func loadConfig() Config {
 	// Define command-line flags
-	dbType := flag.String("type", "blog", "Database type to process: 'blog' or 'diary'")
+	dbType := flag.String("type", "all", "Database type to process: 'blog', 'diary', or 'all' (default)")
 	flag.Parse()
 
 	// Load .env file if it exists
@@ -503,11 +503,33 @@ func loadConfig() Config {
 		if config.NotionDiaryDatabaseID == "" {
 			log.Fatal("NOTION_DIARY_DATABASE_ID environment variable is required for diary database")
 		}
+	} else if config.DatabaseType == "all" {
+		if config.NotionBlogDatabaseID == "" {
+			log.Fatal("NOTION_BLOG_DATABASE_ID environment variable is required for 'all' mode")
+		}
+		if config.NotionDiaryDatabaseID == "" {
+			log.Fatal("NOTION_DIARY_DATABASE_ID environment variable is required for 'all' mode")
+		}
 	} else {
-		log.Fatalf("Invalid database type: %s. Must be 'blog' or 'diary'", config.DatabaseType)
+		log.Fatalf("Invalid database type: %s. Must be 'blog', 'diary', or 'all'", config.DatabaseType)
 	}
 
 	return config
+}
+
+// processDatabaseType processes a specific database type
+func processDatabaseType(config Config, dbType string) {
+	// Create a copy of the config with the specified database type
+	dbConfig := config
+	dbConfig.DatabaseType = dbType
+
+	// Fetch database and pages
+	client, pages := fetchDatabase(dbConfig)
+
+	// Process each article
+	for _, page := range pages {
+		processPage(client, page, dbConfig)
+	}
 }
 
 func main() {
@@ -519,12 +541,14 @@ func main() {
 		log.Fatalf("Failed to create output directory: %v", err)
 	}
 
-	// Fetch database and pages
-	client, pages := fetchDatabase(config)
-
-	// Process each article
-	for _, page := range pages {
-		processPage(client, page, config)
+	if config.DatabaseType == "all" {
+		// Process both database types
+		fmt.Println("Processing all database types...")
+		processDatabaseType(config, "blog")
+		processDatabaseType(config, "diary")
+	} else {
+		// Process the specified database type
+		processDatabaseType(config, config.DatabaseType)
 	}
 
 	fmt.Println("Conversion completed!")
