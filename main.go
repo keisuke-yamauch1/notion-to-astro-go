@@ -406,7 +406,25 @@ func processPage(client *notionapi.Client, page notionapi.Page, config Config) {
 
 	// Save to file
 	filename := generateFilename(page)
-	outputPath := filepath.Join(config.OutputDir, filename)
+
+	// Create subdirectory based on database type
+	var subDir string
+	if config.DatabaseType == "blog" {
+		subDir = "blog"
+	} else if config.DatabaseType == "diary" {
+		subDir = "diary"
+	}
+
+	// Create the full output directory path
+	fullOutputDir := filepath.Join(config.OutputDir, subDir)
+
+	// Create the directory if it doesn't exist
+	if err := os.MkdirAll(fullOutputDir, 0755); err != nil {
+		log.Printf("Failed to create output directory %s: %v", fullOutputDir, err)
+		return
+	}
+
+	outputPath := filepath.Join(fullOutputDir, filename)
 	if err := ioutil.WriteFile(outputPath, []byte(content), 0644); err != nil {
 		log.Printf("Failed to write article to file %s: %v", outputPath, err)
 		return
