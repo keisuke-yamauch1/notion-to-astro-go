@@ -13,7 +13,6 @@ import (
 
 	"github.com/joho/godotenv"
 	"github.com/jomei/notionapi"
-	"gopkg.in/yaml.v3"
 )
 
 // Configuration for the application
@@ -27,10 +26,12 @@ type Config struct {
 
 // Frontmatter for Astro templates
 type Frontmatter struct {
+	ID          string   `yaml:"id,omitempty"`
 	Title       string   `yaml:"title"`
 	Description string   `yaml:"description,omitempty"`
 	PublishedAt string   `yaml:"publishedAt,omitempty"`
 	UpdatedAt   string   `yaml:"updatedAt,omitempty"`
+	Date        string   `yaml:"date,omitempty"`
 	Tags        []string `yaml:"tags,omitempty"`
 	Draft       bool     `yaml:"draft,omitempty"`
 }
@@ -55,11 +56,50 @@ func extractRichText(richText []notionapi.RichText) string {
 
 // generateFrontmatterYAML generates YAML frontmatter
 func generateFrontmatterYAML(frontmatter Frontmatter) (string, error) {
-	yamlBytes, err := yaml.Marshal(frontmatter)
-	if err != nil {
-		return "", fmt.Errorf("failed to marshal frontmatter to YAML: %w", err)
+	// Create a custom YAML representation
+	var yamlBuilder strings.Builder
+
+	// Add ID if present
+	if frontmatter.ID != "" {
+		yamlBuilder.WriteString(fmt.Sprintf("id: %s\n", frontmatter.ID))
 	}
-	return string(yamlBytes), nil
+
+	// Add title
+	yamlBuilder.WriteString(fmt.Sprintf("title: %s\n", frontmatter.Title))
+
+	// Add description if present
+	if frontmatter.Description != "" {
+		yamlBuilder.WriteString(fmt.Sprintf("description: %s\n", frontmatter.Description))
+	}
+
+	// Add publishedAt if present
+	if frontmatter.PublishedAt != "" {
+		yamlBuilder.WriteString(fmt.Sprintf("publishedAt: %s\n", frontmatter.PublishedAt))
+	}
+
+	// Add date if present (without quotes)
+	if frontmatter.Date != "" {
+		yamlBuilder.WriteString(fmt.Sprintf("date: %s\n", frontmatter.Date))
+	}
+
+	// Add tags if present (in the format ["tag1", "tag2", "tag3"])
+	if len(frontmatter.Tags) > 0 {
+		yamlBuilder.WriteString("tags: [")
+		for i, tag := range frontmatter.Tags {
+			if i > 0 {
+				yamlBuilder.WriteString(", ")
+			}
+			yamlBuilder.WriteString(fmt.Sprintf("\"%s\"", tag))
+		}
+		yamlBuilder.WriteString("]\n")
+	}
+
+	// Add draft if true
+	if frontmatter.Draft {
+		yamlBuilder.WriteString("draft: true\n")
+	}
+
+	return yamlBuilder.String(), nil
 }
 
 // generateFilename generates a filename for the article
@@ -196,9 +236,31 @@ func main() {
 
 		// Create frontmatter
 		frontmatter := Frontmatter{
-			Title:     title,
-			UpdatedAt: page.LastEditedTime.Format("2006-01-02"),
+			ID:    page.ID.String(),
+			Title: title,
 		}
+
+		// Extract tags if available
+		if tagsProp, ok := page.Properties["tags"]; ok {
+			if mp, ok := tagsProp.(*notionapi.MultiSelectProperty); ok {
+				tags := make([]string, len(mp.MultiSelect))
+				for i, tag := range mp.MultiSelect {
+					tags[i] = tag.Name
+				}
+				frontmatter.Tags = tags
+			}
+		} else if tagsProp, ok := page.Properties["Tags"]; ok {
+			if mp, ok := tagsProp.(*notionapi.MultiSelectProperty); ok {
+				tags := make([]string, len(mp.MultiSelect))
+				for i, tag := range mp.MultiSelect {
+					tags[i] = tag.Name
+				}
+				frontmatter.Tags = tags
+			}
+		}
+
+		// Use CreatedTime as the date
+		frontmatter.Date = page.CreatedTime.Format("2006-01-02")
 
 		// Generate frontmatter YAML
 		frontmatterYAML, err := generateFrontmatterYAML(frontmatter)
