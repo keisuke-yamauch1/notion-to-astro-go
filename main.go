@@ -262,12 +262,12 @@ func generateFilename(page notionapi.Page) string {
 		title = page.ID.String()
 	}
 
-	// Sanitize title for filename
-	reg := regexp.MustCompile(`[^a-zA-Z0-9]+`)
-	sanitized := reg.ReplaceAllString(strings.ToLower(title), "-")
-	sanitized = strings.Trim(sanitized, "-")
+	// Replace only invalid filename characters
+	// These characters are invalid in most file systems: / \ : * ? " < > |
+	reg := regexp.MustCompile(`[/\\:*?"<>|]`)
+	filename := reg.ReplaceAllString(title, "_")
 
-	return sanitized + ".md"
+	return filename + ".md"
 }
 
 // processPage processes a single Notion page and saves it as a markdown file
