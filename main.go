@@ -269,7 +269,192 @@ func generateFilename(page notionapi.Page) string {
 	return sanitized + ".md"
 }
 
-func main() {
+// processPage processes a single Notion page and saves it as a markdown file
+func processPage(client *notionapi.Client, page notionapi.Page, config Config) {
+	// Extract title
+	title := ""
+	if titleProp, ok := page.Properties["title"]; ok {
+		if tp, ok := titleProp.(*notionapi.TitleProperty); ok && len(tp.Title) > 0 {
+			title = tp.Title[0].PlainText
+		}
+	} else if titleProp, ok := page.Properties["Title"]; ok {
+		if tp, ok := titleProp.(*notionapi.TitleProperty); ok && len(tp.Title) > 0 {
+			title = tp.Title[0].PlainText
+		}
+	} else if titleProp, ok := page.Properties["Name"]; ok {
+		if tp, ok := titleProp.(*notionapi.TitleProperty); ok && len(tp.Title) > 0 {
+			title = tp.Title[0].PlainText
+		}
+	} else if titleProp, ok := page.Properties["titile"]; ok { // Handle typo in field name
+		if tp, ok := titleProp.(*notionapi.TitleProperty); ok && len(tp.Title) > 0 {
+			title = tp.Title[0].PlainText
+		}
+	}
+
+	if title == "" {
+		log.Printf("Skipping page %s: no title found", page.ID)
+		return
+	}
+
+	// Create frontmatter with page ID as fallback
+	frontmatter := Frontmatter{
+		ID:    page.ID.String(),
+		Title: title,
+	}
+
+	// Try to get ID from properties (use the ID column value from Notion)
+	var idProp notionapi.Property
+	var ok bool
+
+	// Check for "ID" or "id" property
+	if idProp, ok = page.Properties["ID"]; !ok {
+		idProp, ok = page.Properties["id"]
+	}
+
+	if ok {
+		// Convert the property to string and extract the last part (the actual ID value)
+		idStr := fmt.Sprintf("%v", idProp)
+		parts := strings.Split(idStr, " ")
+		if len(parts) > 0 {
+			// Get the last part and remove any closing brace
+			lastPart := strings.TrimSuffix(parts[len(parts)-1], "}")
+			frontmatter.ID = lastPart
+		} else {
+			frontmatter.ID = idStr
+		}
+	}
+
+	// Extract tags if available
+	if tagsProp, ok := page.Properties["tags"]; ok {
+		if mp, ok := tagsProp.(*notionapi.MultiSelectProperty); ok {
+			tags := make([]string, len(mp.MultiSelect))
+			for i, tag := range mp.MultiSelect {
+				tags[i] = tag.Name
+			}
+			frontmatter.Tags = tags
+		}
+	} else if tagsProp, ok := page.Properties["Tags"]; ok {
+		if mp, ok := tagsProp.(*notionapi.MultiSelectProperty); ok {
+			tags := make([]string, len(mp.MultiSelect))
+			for i, tag := range mp.MultiSelect {
+				tags[i] = tag.Name
+			}
+			frontmatter.Tags = tags
+		}
+	}
+
+	// For diary entries, extract description and weather
+	if config.DatabaseType == "diary" {
+		// Extract description
+		if descProp, ok := page.Properties["description"]; ok {
+			if rtp, ok := descProp.(*notionapi.RichTextProperty); ok && len(rtp.RichText) > 0 {
+				frontmatter.Description = rtp.RichText[0].PlainText
+			}
+		}
+
+		// Extract weather
+		if weatherProp, ok := page.Properties["weather"]; ok {
+			if rtp, ok := weatherProp.(*notionapi.RichTextProperty); ok && len(rtp.RichText) > 0 {
+				frontmatter.Weather = rtp.RichText[0].PlainText
+			}
+		}
+	}
+
+	// Use CreatedTime as the date
+	frontmatter.Date = page.CreatedTime.Format("2006-01-02")
+
+	// Retrieve page content
+	pageContent, err := retrievePageContent(client, page.ID)
+	if err != nil {
+		log.Printf("Failed to retrieve content for page %s: %v", page.ID, err)
+		// If we can't retrieve the content, use a placeholder
+		pageContent = "This content was imported from Notion, but the content could not be retrieved."
+	}
+
+	// For blog entries, set description as first 70 characters of content with newlines converted to spaces
+	if config.DatabaseType == "blog" && pageContent != "" {
+		// Replace newlines with spaces
+		descriptionText := strings.ReplaceAll(pageContent, "\n", " ")
+		// Remove extra spaces
+		descriptionText = regexp.MustCompile(`\s+`).ReplaceAllString(descriptionText, " ")
+		// Trim spaces
+		descriptionText = strings.TrimSpace(descriptionText)
+		// Get first 70 characters or less if content is shorter
+		// Use runes to correctly handle multi-byte characters like Japanese
+		runes := []rune(descriptionText)
+		if len(runes) > 70 {
+			frontmatter.Description = string(runes[:70]) + "..."
+		} else {
+			frontmatter.Description = descriptionText
+		}
+	} else if config.DatabaseType == "blog" {
+		log.Printf("Not setting description for blog entry: %s (empty content)", title)
+	}
+
+	// Generate frontmatter YAML
+	frontmatterYAML, err := generateFrontmatterYAML(frontmatter)
+	if err != nil {
+		log.Printf("Failed to generate frontmatter for page %s: %v", page.ID, err)
+		return
+	}
+
+	// Create content with frontmatter
+	content := fmt.Sprintf("---\n%s---\n\n%s", frontmatterYAML, pageContent)
+
+	// Process empty lines: remove single empty lines, but keep one if there are multiple consecutive empty lines
+	content = processEmptyLines(content)
+
+	// Save to file
+	filename := generateFilename(page)
+	outputPath := filepath.Join(config.OutputDir, filename)
+	if err := ioutil.WriteFile(outputPath, []byte(content), 0644); err != nil {
+		log.Printf("Failed to write article to file %s: %v", outputPath, err)
+		return
+	}
+
+	fmt.Printf("Successfully converted article: %s\n", outputPath)
+}
+
+// fetchDatabase initializes the Notion client, fetches the database, and queries it for pages
+func fetchDatabase(config Config) (*notionapi.Client, []notionapi.Page) {
+	// Initialize Notion client
+	client := notionapi.NewClient(notionapi.Token(config.NotionAPIToken))
+
+	// Determine which database ID to use
+	var databaseID string
+	if config.DatabaseType == "blog" {
+		databaseID = config.NotionBlogDatabaseID
+		fmt.Println("Processing blog database...")
+	} else {
+		databaseID = config.NotionDiaryDatabaseID
+		fmt.Println("Processing diary database...")
+	}
+
+	// Fetch database
+	database, err := client.Database.Get(context.Background(), notionapi.DatabaseID(databaseID))
+	if err != nil {
+		log.Fatalf("Failed to get database: %v", err)
+	}
+
+	fmt.Printf("Found database: %s\n", database.Title[0].PlainText)
+
+	// Query database for pages
+	query := &notionapi.DatabaseQueryRequest{
+		PageSize: 100,
+	}
+
+	resp, err := client.Database.Query(context.Background(), notionapi.DatabaseID(databaseID), query)
+	if err != nil {
+		log.Fatalf("Failed to query database: %v", err)
+	}
+
+	fmt.Printf("Found %d articles in Notion database\n", len(resp.Results))
+
+	return client, resp.Results
+}
+
+// loadConfig loads and validates the application configuration
+func loadConfig() Config {
 	// Define command-line flags
 	dbType := flag.String("type", "blog", "Database type to process: 'blog' or 'diary'")
 	flag.Parse()
@@ -308,188 +493,24 @@ func main() {
 		log.Fatalf("Invalid database type: %s. Must be 'blog' or 'diary'", config.DatabaseType)
 	}
 
+	return config
+}
+
+func main() {
+	// Load and validate configuration
+	config := loadConfig()
+
 	// Create output directory if it doesn't exist
 	if err := os.MkdirAll(config.OutputDir, 0755); err != nil {
 		log.Fatalf("Failed to create output directory: %v", err)
 	}
 
-	// Initialize Notion client
-	client := notionapi.NewClient(notionapi.Token(config.NotionAPIToken))
-
-	// Determine which database ID to use
-	var databaseID string
-	if config.DatabaseType == "blog" {
-		databaseID = config.NotionBlogDatabaseID
-		fmt.Println("Processing blog database...")
-	} else {
-		databaseID = config.NotionDiaryDatabaseID
-		fmt.Println("Processing diary database...")
-	}
-
-	// Fetch database
-	database, err := client.Database.Get(context.Background(), notionapi.DatabaseID(databaseID))
-	if err != nil {
-		log.Fatalf("Failed to get database: %v", err)
-	}
-
-	fmt.Printf("Found database: %s\n", database.Title[0].PlainText)
-
-	// Query database for pages
-	query := &notionapi.DatabaseQueryRequest{
-		PageSize: 100,
-	}
-
-	resp, err := client.Database.Query(context.Background(), notionapi.DatabaseID(databaseID), query)
-	if err != nil {
-		log.Fatalf("Failed to query database: %v", err)
-	}
-
-	fmt.Printf("Found %d articles in Notion database\n", len(resp.Results))
+	// Fetch database and pages
+	client, pages := fetchDatabase(config)
 
 	// Process each article
-	for _, page := range resp.Results {
-		// Extract title
-		title := ""
-		if titleProp, ok := page.Properties["title"]; ok {
-			if tp, ok := titleProp.(*notionapi.TitleProperty); ok && len(tp.Title) > 0 {
-				title = tp.Title[0].PlainText
-			}
-		} else if titleProp, ok := page.Properties["Title"]; ok {
-			if tp, ok := titleProp.(*notionapi.TitleProperty); ok && len(tp.Title) > 0 {
-				title = tp.Title[0].PlainText
-			}
-		} else if titleProp, ok := page.Properties["Name"]; ok {
-			if tp, ok := titleProp.(*notionapi.TitleProperty); ok && len(tp.Title) > 0 {
-				title = tp.Title[0].PlainText
-			}
-		} else if titleProp, ok := page.Properties["titile"]; ok { // Handle typo in field name
-			if tp, ok := titleProp.(*notionapi.TitleProperty); ok && len(tp.Title) > 0 {
-				title = tp.Title[0].PlainText
-			}
-		}
-
-		if title == "" {
-			log.Printf("Skipping page %s: no title found", page.ID)
-			continue
-		}
-
-		// Create frontmatter with page ID as fallback
-		frontmatter := Frontmatter{
-			ID:    page.ID.String(),
-			Title: title,
-		}
-
-		// Try to get ID from properties (use the ID column value from Notion)
-		var idProp notionapi.Property
-		var ok bool
-
-		// Check for "ID" or "id" property
-		if idProp, ok = page.Properties["ID"]; !ok {
-			idProp, ok = page.Properties["id"]
-		}
-
-		if ok {
-			// Convert the property to string and extract the last part (the actual ID value)
-			idStr := fmt.Sprintf("%v", idProp)
-			parts := strings.Split(idStr, " ")
-			if len(parts) > 0 {
-				// Get the last part and remove any closing brace
-				lastPart := strings.TrimSuffix(parts[len(parts)-1], "}")
-				frontmatter.ID = lastPart
-			} else {
-				frontmatter.ID = idStr
-			}
-		}
-
-		// Extract tags if available
-		if tagsProp, ok := page.Properties["tags"]; ok {
-			if mp, ok := tagsProp.(*notionapi.MultiSelectProperty); ok {
-				tags := make([]string, len(mp.MultiSelect))
-				for i, tag := range mp.MultiSelect {
-					tags[i] = tag.Name
-				}
-				frontmatter.Tags = tags
-			}
-		} else if tagsProp, ok := page.Properties["Tags"]; ok {
-			if mp, ok := tagsProp.(*notionapi.MultiSelectProperty); ok {
-				tags := make([]string, len(mp.MultiSelect))
-				for i, tag := range mp.MultiSelect {
-					tags[i] = tag.Name
-				}
-				frontmatter.Tags = tags
-			}
-		}
-
-		// For diary entries, extract description and weather
-		if config.DatabaseType == "diary" {
-			// Extract description
-			if descProp, ok := page.Properties["description"]; ok {
-				if rtp, ok := descProp.(*notionapi.RichTextProperty); ok && len(rtp.RichText) > 0 {
-					frontmatter.Description = rtp.RichText[0].PlainText
-				}
-			}
-
-			// Extract weather
-			if weatherProp, ok := page.Properties["weather"]; ok {
-				if rtp, ok := weatherProp.(*notionapi.RichTextProperty); ok && len(rtp.RichText) > 0 {
-					frontmatter.Weather = rtp.RichText[0].PlainText
-				}
-			}
-		}
-
-		// Use CreatedTime as the date
-		frontmatter.Date = page.CreatedTime.Format("2006-01-02")
-
-		// Retrieve page content
-		pageContent, err := retrievePageContent(client, page.ID)
-		if err != nil {
-			log.Printf("Failed to retrieve content for page %s: %v", page.ID, err)
-			// If we can't retrieve the content, use a placeholder
-			pageContent = "This content was imported from Notion, but the content could not be retrieved."
-		}
-
-		// For blog entries, set description as first 70 characters of content with newlines converted to spaces
-		if config.DatabaseType == "blog" && pageContent != "" {
-			// Replace newlines with spaces
-			descriptionText := strings.ReplaceAll(pageContent, "\n", " ")
-			// Remove extra spaces
-			descriptionText = regexp.MustCompile(`\s+`).ReplaceAllString(descriptionText, " ")
-			// Trim spaces
-			descriptionText = strings.TrimSpace(descriptionText)
-			// Get first 70 characters or less if content is shorter
-			// Use runes to correctly handle multi-byte characters like Japanese
-			runes := []rune(descriptionText)
-			if len(runes) > 70 {
-				frontmatter.Description = string(runes[:70]) + "..."
-			} else {
-				frontmatter.Description = descriptionText
-			}
-		} else if config.DatabaseType == "blog" {
-			log.Printf("Not setting description for blog entry: %s (empty content)", title)
-		}
-
-		// Generate frontmatter YAML
-		frontmatterYAML, err := generateFrontmatterYAML(frontmatter)
-		if err != nil {
-			log.Printf("Failed to generate frontmatter for page %s: %v", page.ID, err)
-			continue
-		}
-
-		// Create content with frontmatter
-		content := fmt.Sprintf("---\n%s---\n\n%s", frontmatterYAML, pageContent)
-
-		// Process empty lines: remove single empty lines, but keep one if there are multiple consecutive empty lines
-		content = processEmptyLines(content)
-
-		// Save to file
-		filename := generateFilename(page)
-		outputPath := filepath.Join(config.OutputDir, filename)
-		if err := ioutil.WriteFile(outputPath, []byte(content), 0644); err != nil {
-			log.Printf("Failed to write article to file %s: %v", outputPath, err)
-			continue
-		}
-
-		fmt.Printf("Successfully converted article: %s\n", outputPath)
+	for _, page := range pages {
+		processPage(client, page, config)
 	}
 
 	fmt.Println("Conversion completed!")
