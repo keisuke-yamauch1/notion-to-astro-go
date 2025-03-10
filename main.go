@@ -46,11 +46,18 @@ func getEnv(key, defaultValue string) string {
 	return value
 }
 
-// extractRichText extracts plain text from rich text
+// extractRichText extracts text from rich text, preserving links
 func extractRichText(richText []notionapi.RichText) string {
 	var text strings.Builder
 	for _, rt := range richText {
-		text.WriteString(rt.PlainText)
+		// Check if this rich text has a link
+		if rt.Href != "" {
+			// Format as markdown link: [text](url)
+			text.WriteString(fmt.Sprintf("[%s](%s)", rt.PlainText, rt.Href))
+		} else {
+			// Just add the plain text
+			text.WriteString(rt.PlainText)
+		}
 	}
 	return text.String()
 }
