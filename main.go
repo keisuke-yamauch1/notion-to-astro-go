@@ -6,6 +6,9 @@ import (
 	"encoding/hex"
 	"flag"
 	"fmt"
+	"image"
+	"image/jpeg"
+	"image/png"
 	"io"
 	"log"
 	"net/http"
@@ -17,6 +20,9 @@ import (
 
 	"github.com/joho/godotenv"
 	"github.com/jomei/notionapi"
+
+	// Register image formats
+	_ "image/gif"
 )
 
 // Configuration for the application
@@ -581,7 +587,7 @@ func processDatabaseType(config Config, dbType string) {
 	}
 }
 
-// downloadImage downloads an image from a URL and saves it to the specified directory
+// downloadImage downloads an image from a URL, compresses it, and saves it to the specified directory
 // Returns the local path to the image
 func downloadImage(imageURL, outputDir, pageID string) (string, error) {
 	// Create a hash of the URL to use as the filename
@@ -599,6 +605,9 @@ func downloadImage(imageURL, outputDir, pageID string) (string, error) {
 		// Remove path parameters if any
 		ext = strings.Split(ext, "/")[0]
 	}
+
+	// Normalize extension to lowercase
+	ext = strings.ToLower(ext)
 
 	// Create a filename with page ID for better organization
 	filename := fmt.Sprintf("%s_%s.%s", pageID, hash, ext)
@@ -627,6 +636,12 @@ func downloadImage(imageURL, outputDir, pageID string) (string, error) {
 		return "", fmt.Errorf("failed to download image, status code: %d", resp.StatusCode)
 	}
 
+	// Decode the image
+	img, _, err := image.Decode(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("failed to decode image: %v", err)
+	}
+
 	// Create the output file
 	out, err := os.Create(outputPath)
 	if err != nil {
@@ -634,10 +649,28 @@ func downloadImage(imageURL, outputDir, pageID string) (string, error) {
 	}
 	defer out.Close()
 
-	// Copy the response body to the output file
-	_, err = io.Copy(out, resp.Body)
+	// Compress and save the image based on its type
+	switch ext {
+	case "jpg", "jpeg":
+		// Compress JPEG with quality 50 (0-100, higher is better quality but larger file)
+		err = jpeg.Encode(out, img, &jpeg.Options{Quality: 50})
+	case "png":
+		// Compress PNG with best compression
+		encoder := png.Encoder{CompressionLevel: png.BestCompression}
+		err = encoder.Encode(out, img)
+	default:
+		// For other formats, just copy the original image data
+		// We need to re-download since we already consumed the response body
+		respNew, errGet := client.Get(imageURL)
+		if errGet != nil {
+			return "", fmt.Errorf("failed to re-download image: %v", errGet)
+		}
+		defer respNew.Body.Close()
+		_, err = io.Copy(out, respNew.Body)
+	}
+
 	if err != nil {
-		return "", fmt.Errorf("failed to save image: %v", err)
+		return "", fmt.Errorf("failed to save compressed image: %v", err)
 	}
 
 	return filename, nil
