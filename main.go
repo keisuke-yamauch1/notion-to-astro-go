@@ -2,13 +2,18 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"flag"
 	"fmt"
+	"io"
 	"log"
+	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/joho/godotenv"
 	"github.com/jomei/notionapi"
@@ -22,6 +27,7 @@ type Config struct {
 	BlogOutputDir         string // Output directory for blog content
 	DiaryOutputDir        string // Output directory for diary content
 	DatabaseType          string // "blog" or "diary"
+	ImagesDir             string // Directory for storing downloaded images
 }
 
 // Frontmatter for Astro templates
@@ -63,7 +69,7 @@ func extractRichText(richText []notionapi.RichText) string {
 }
 
 // retrievePageContent retrieves the content of a Notion page and converts it to markdown
-func retrievePageContent(client *notionapi.Client, pageID notionapi.ObjectID) (string, error) {
+func retrievePageContent(client *notionapi.Client, pageID notionapi.ObjectID, config Config) (string, error) {
 	// Get the children blocks of the page
 	resp, err := client.Block.GetChildren(context.Background(), notionapi.BlockID(pageID), nil)
 	if err != nil {
@@ -131,10 +137,27 @@ func retrievePageContent(client *notionapi.Client, pageID notionapi.ObjectID) (s
 			markdown.WriteString("---  \n\n")
 		case "image":
 			if image, ok := block.(*notionapi.ImageBlock); ok {
+				var imageURL string
 				if image.Image.Type == "external" {
-					markdown.WriteString("![Image](" + image.Image.External.URL + ")  \n\n")
+					imageURL = image.Image.External.URL
 				} else if image.Image.Type == "file" {
-					markdown.WriteString("![Image](" + image.Image.File.URL + ")  \n\n")
+					imageURL = image.Image.File.URL
+				}
+
+				if imageURL != "" {
+					// Download the image and get the local path
+					localImagePath, err := downloadImage(imageURL, config.ImagesDir, pageID.String())
+					if err != nil {
+						log.Printf("Failed to download image: %v", err)
+						// If download fails, use the original URL
+						markdown.WriteString("![Image](" + imageURL + ")  \n\n")
+					} else {
+						// Use the local path for the image
+						// For Astro, we need to use a path relative to the public directory
+						// If ImagesDir is "./public/images", we need to use "/images/filename"
+						relativePath := "/images/" + localImagePath
+						markdown.WriteString("![Image](" + relativePath + ")  \n\n")
+					}
 				}
 			}
 		}
@@ -364,7 +387,7 @@ func processPage(client *notionapi.Client, page notionapi.Page, config Config) {
 	frontmatter.Date = page.CreatedTime.Format("2006-01-02")
 
 	// Retrieve page content
-	pageContent, err := retrievePageContent(client, page.ID)
+	pageContent, err := retrievePageContent(client, page.ID, config)
 	if err != nil {
 		log.Printf("Failed to retrieve content for page %s: %v", page.ID, err)
 		// If we can't retrieve the content, use a placeholder
@@ -511,6 +534,7 @@ func loadConfig() Config {
 		NotionDiaryDatabaseID: getEnv("NOTION_DIARY_DATABASE_ID", ""),
 		BlogOutputDir:         getEnv("BLOG_OUTPUT_DIR", "./content/blog"),
 		DiaryOutputDir:        getEnv("DIARY_OUTPUT_DIR", "./content/diary"),
+		ImagesDir:             getEnv("IMAGES_DIR", "./public/images"),
 		DatabaseType:          *dbType,
 	}
 
@@ -557,6 +581,68 @@ func processDatabaseType(config Config, dbType string) {
 	}
 }
 
+// downloadImage downloads an image from a URL and saves it to the specified directory
+// Returns the local path to the image
+func downloadImage(imageURL, outputDir, pageID string) (string, error) {
+	// Create a hash of the URL to use as the filename
+	hasher := sha256.New()
+	hasher.Write([]byte(imageURL))
+	hash := hex.EncodeToString(hasher.Sum(nil))[:16] // Use first 16 chars of hash
+
+	// Extract file extension from URL
+	urlParts := strings.Split(imageURL, ".")
+	ext := "jpg" // Default extension
+	if len(urlParts) > 1 {
+		ext = urlParts[len(urlParts)-1]
+		// Remove query parameters if any
+		ext = strings.Split(ext, "?")[0]
+		// Remove path parameters if any
+		ext = strings.Split(ext, "/")[0]
+	}
+
+	// Create a filename with page ID for better organization
+	filename := fmt.Sprintf("%s_%s.%s", pageID, hash, ext)
+	outputPath := filepath.Join(outputDir, filename)
+
+	// Check if file already exists
+	if _, err := os.Stat(outputPath); err == nil {
+		// File exists, return the path
+		return filename, nil
+	}
+
+	// Create a client with timeout
+	client := &http.Client{
+		Timeout: 30 * time.Second,
+	}
+
+	// Download the image
+	resp, err := client.Get(imageURL)
+	if err != nil {
+		return "", fmt.Errorf("failed to download image: %v", err)
+	}
+	defer resp.Body.Close()
+
+	// Check if the response is successful
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("failed to download image, status code: %d", resp.StatusCode)
+	}
+
+	// Create the output file
+	out, err := os.Create(outputPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to create output file: %v", err)
+	}
+	defer out.Close()
+
+	// Copy the response body to the output file
+	_, err = io.Copy(out, resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("failed to save image: %v", err)
+	}
+
+	return filename, nil
+}
+
 func main() {
 	// Load and validate configuration
 	config := loadConfig()
@@ -571,6 +657,11 @@ func main() {
 		if err := os.MkdirAll(config.DiaryOutputDir, 0755); err != nil {
 			log.Fatalf("Failed to create diary output directory: %v", err)
 		}
+	}
+
+	// Create images directory if it doesn't exist
+	if err := os.MkdirAll(config.ImagesDir, 0755); err != nil {
+		log.Fatalf("Failed to create images directory: %v", err)
 	}
 
 	if config.DatabaseType == "all" {

@@ -39,6 +39,7 @@ NOTION_BLOG_DATABASE_ID=your_notion_blog_database_id
 NOTION_DIARY_DATABASE_ID=your_notion_diary_database_id
 BLOG_OUTPUT_DIR=./content/blog  # ブログ記事の出力先ディレクトリ
 DIARY_OUTPUT_DIR=./content/diary  # 日記エントリの出力先ディレクトリ
+IMAGES_DIR=./public/images  # Notionから取得した画像の保存先ディレクトリ
 ```
 
 #### 2. 直接環境変数を設定する方法
@@ -49,6 +50,7 @@ export NOTION_BLOG_DATABASE_ID="your_notion_blog_database_id"
 export NOTION_DIARY_DATABASE_ID="your_notion_diary_database_id"
 export BLOG_OUTPUT_DIR="./content/blog"  # ブログ記事の出力先ディレクトリ
 export DIARY_OUTPUT_DIR="./content/diary"  # 日記エントリの出力先ディレクトリ
+export IMAGES_DIR="./public/images"  # Notionから取得した画像の保存先ディレクトリ
 ```
 
 ### 実行
@@ -81,6 +83,7 @@ go run main.go -type diary
 - ブログ記事の場合、最初の70文字を自動的に説明文として使用
 - 日記エントリの場合、説明文と天気情報を抽出
 - 空行の処理：段落間の単一の空行を削除し、複数の連続した空行がある場合は1つだけ保持
+- 画像の処理：Notionの画像を自動的にダウンロードし、Astroプロジェクトの指定されたディレクトリに保存して、マークダウン内の参照を更新
 
 ## フィルタリング
 
@@ -183,7 +186,11 @@ draft: true
 - `Invalid database type: X. Must be 'blog' or 'diary'`: 無効なデータベースタイプが指定されました。'blog'または'diary'を指定してください
 - `Failed to create blog output directory`: ブログ記事の出力ディレクトリの作成に失敗しました
 - `Failed to create diary output directory`: 日記エントリの出力ディレクトリの作成に失敗しました
+- `Failed to create images directory`: 画像の出力ディレクトリの作成に失敗しました
 - `Failed to get database`: Notionデータベースの取得に失敗しました
 - `Failed to query database`: Notionデータベースのクエリに失敗しました
 - `Failed to convert article`: 記事のAstroテンプレートへの変換に失敗しました
 - `Failed to write article to file`: 記事のファイルへの書き込みに失敗しました
+- `Failed to download image`: 画像のダウンロードに失敗しました。この場合、元のNotionの画像URLが使用されます
+- `Failed to create output file`: 画像ファイルの作成に失敗しました
+- `Failed to save image`: 画像の保存に失敗しました
