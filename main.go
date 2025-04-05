@@ -379,16 +379,8 @@ func processPage(client *notionapi.Client, page notionapi.Page, config Config) {
 		}
 	}
 
-	// For diary entries, extract description and weather
+	// For diary entries, extract weather only (description is no longer needed)
 	if config.DatabaseType == "diary" {
-		// Extract description
-		if descProp, ok := page.Properties["description"]; ok {
-			if rtp, ok := descProp.(*notionapi.RichTextProperty); ok && len(rtp.RichText) > 0 {
-				// Convert markdown links to plain text
-				frontmatter.Description = convertMarkdownLinksToPlainText(rtp.RichText[0].PlainText)
-			}
-		}
-
 		// Extract weather
 		if weatherProp, ok := page.Properties["weather"]; ok {
 			if rtp, ok := weatherProp.(*notionapi.RichTextProperty); ok && len(rtp.RichText) > 0 {
