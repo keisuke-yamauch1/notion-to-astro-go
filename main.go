@@ -225,6 +225,13 @@ func generateFrontmatterYAML(frontmatter Frontmatter) (string, error) {
 	return yamlBuilder.String(), nil
 }
 
+// convertMarkdownLinksToPlainText converts markdown links [text](url) to plain text (text only)
+func convertMarkdownLinksToPlainText(text string) string {
+	// Regular expression to match markdown links: [text](url)
+	re := regexp.MustCompile(`\[([^\]]+)\]\([^)]+\)`)
+	return re.ReplaceAllString(text, "$1")
+}
+
 // processEmptyLines processes the content to handle empty lines according to requirements:
 // - Remove single empty lines between sentences
 // - If there are multiple consecutive empty lines, keep just one
@@ -377,7 +384,8 @@ func processPage(client *notionapi.Client, page notionapi.Page, config Config) {
 		// Extract description
 		if descProp, ok := page.Properties["description"]; ok {
 			if rtp, ok := descProp.(*notionapi.RichTextProperty); ok && len(rtp.RichText) > 0 {
-				frontmatter.Description = rtp.RichText[0].PlainText
+				// Convert markdown links to plain text
+				frontmatter.Description = convertMarkdownLinksToPlainText(rtp.RichText[0].PlainText)
 			}
 		}
 
@@ -408,6 +416,10 @@ func processPage(client *notionapi.Client, page notionapi.Page, config Config) {
 		descriptionText = regexp.MustCompile(`\s+`).ReplaceAllString(descriptionText, " ")
 		// Trim spaces
 		descriptionText = strings.TrimSpace(descriptionText)
+
+		// Convert markdown links to plain text first
+		descriptionText = convertMarkdownLinksToPlainText(descriptionText)
+
 		// Get first 70 characters or less if content is shorter
 		// Use runes to correctly handle multi-byte characters like Japanese
 		runes := []rune(descriptionText)
@@ -435,6 +447,14 @@ func processPage(client *notionapi.Client, page notionapi.Page, config Config) {
 
 	// Save to file
 	filename := generateFilename(page)
+
+	// For diary entries, add the date at the beginning of the filename
+	if config.DatabaseType == "diary" && frontmatter.Date != "" {
+		// Extract just the filename without extension
+		filenameWithoutExt := strings.TrimSuffix(filename, filepath.Ext(filename))
+		// Create new filename with date prefix
+		filename = frontmatter.Date + "_" + filenameWithoutExt + filepath.Ext(filename)
+	}
 
 	// Determine the output directory based on database type
 	var outputDir string

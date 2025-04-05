@@ -166,3 +166,51 @@ func TestBlogDescriptionGeneration(t *testing.T) {
 		})
 	}
 }
+
+func TestConvertMarkdownLinksToPlainText(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "No markdown links",
+			input:    "This is a text without markdown links.",
+			expected: "This is a text without markdown links.",
+		},
+		{
+			name:     "Single markdown link",
+			input:    "[aaa](https://www.kechiiiiin.com/)は〇〇だ",
+			expected: "aaaは〇〇だ",
+		},
+		{
+			name:     "Multiple markdown links",
+			input:    "[aaa](https://www.kechiiiiin.com/)は[bbb](https://example.com)だ",
+			expected: "aaaはbbbだ",
+		},
+		{
+			name:     "Markdown link with Japanese text",
+			input:    "[日本語](https://example.jp/)のテキスト",
+			expected: "日本語のテキスト",
+		},
+		{
+			name:     "Text with brackets but not a markdown link",
+			input:    "This [is] not a markdown link.",
+			expected: "This [is] not a markdown link.",
+		},
+		{
+			name:     "Text with parentheses but not a markdown link",
+			input:    "This (is) not a markdown link.",
+			expected: "This (is) not a markdown link.",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := convertMarkdownLinksToPlainText(tt.input)
+			if result != tt.expected {
+				t.Errorf("convertMarkdownLinksToPlainText() = %v, want %v", result, tt.expected)
+			}
+		})
+	}
+}
