@@ -1,5 +1,3 @@
-
-
 .PHONY: all blog dairy
 
 all:
