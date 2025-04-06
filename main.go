@@ -76,17 +76,24 @@ func extractRichText(richText []notionapi.RichText) string {
 
 // retrievePageContent retrieves the content of a Notion page and converts it to markdown
 func retrievePageContent(client *notionapi.Client, pageID notionapi.ObjectID, config Config) (string, error) {
+	fmt.Printf("Retrieving content for page: %s\n", pageID)
+
 	// Get the children blocks of the page
+	fmt.Println("Fetching children blocks...")
 	resp, err := client.Block.GetChildren(context.Background(), notionapi.BlockID(pageID), nil)
 	if err != nil {
+		fmt.Printf("Error retrieving page content: %v\n", err)
 		return "", fmt.Errorf("failed to retrieve page content: %v", err)
 	}
+	fmt.Printf("Retrieved %d blocks from page\n", len(resp.Results))
 
 	// Convert blocks to markdown
+	fmt.Println("Converting blocks to markdown...")
 	var markdown strings.Builder
-	for _, block := range resp.Results {
+	for i, block := range resp.Results {
 		// Process each block based on its type
 		blockType := block.GetType()
+		fmt.Printf("Processing block %d of %d (type: %s)\n", i+1, len(resp.Results), blockType)
 
 		switch blockType {
 		case "paragraph":
@@ -154,7 +161,7 @@ func retrievePageContent(client *notionapi.Client, pageID notionapi.ObjectID, co
 					// Download the image and get the local path
 					localImagePath, err := downloadImage(imageURL, config.ImagesDir, pageID.String())
 					if err != nil {
-						log.Printf("Failed to download image: %v", err)
+						fmt.Printf("Failed to download image: %v\n", err)
 						// If download fails, use the original URL
 						markdown.WriteString("![Image](" + imageURL + ")  \n\n")
 					} else {
@@ -169,6 +176,7 @@ func retrievePageContent(client *notionapi.Client, pageID notionapi.ObjectID, co
 		}
 	}
 
+	fmt.Printf("Successfully converted page content to markdown (%d characters)\n", len(markdown.String()))
 	return markdown.String(), nil
 }
 
@@ -307,7 +315,10 @@ func generateFilename(page notionapi.Page) string {
 
 // processPage processes a single Notion page and saves it as a markdown file
 func processPage(client *notionapi.Client, page notionapi.Page, config Config) {
+	fmt.Printf("Processing page: %s\n", page.ID)
+
 	// Extract title
+	fmt.Println("Extracting title...")
 	title := ""
 	if titleProp, ok := page.Properties["title"]; ok {
 		if tp, ok := titleProp.(*notionapi.TitleProperty); ok && len(tp.Title) > 0 {
@@ -328,7 +339,7 @@ func processPage(client *notionapi.Client, page notionapi.Page, config Config) {
 	}
 
 	if title == "" {
-		log.Printf("Skipping page %s: no title found", page.ID)
+		fmt.Printf("Skipping page %s: no title found\n", page.ID)
 		return
 	}
 
@@ -361,6 +372,7 @@ func processPage(client *notionapi.Client, page notionapi.Page, config Config) {
 	}
 
 	// Extract tags if available
+	fmt.Println("Extracting tags...")
 	if tagsProp, ok := page.Properties["tags"]; ok {
 		if mp, ok := tagsProp.(*notionapi.MultiSelectProperty); ok {
 			tags := make([]string, len(mp.MultiSelect))
@@ -368,6 +380,7 @@ func processPage(client *notionapi.Client, page notionapi.Page, config Config) {
 				tags[i] = tag.Name
 			}
 			frontmatter.Tags = tags
+			log.Printf("Found %d tags", len(tags))
 		}
 	} else if tagsProp, ok := page.Properties["Tags"]; ok {
 		if mp, ok := tagsProp.(*notionapi.MultiSelectProperty); ok {
@@ -376,16 +389,25 @@ func processPage(client *notionapi.Client, page notionapi.Page, config Config) {
 				tags[i] = tag.Name
 			}
 			frontmatter.Tags = tags
+			log.Printf("Found %d tags", len(tags))
 		}
+	} else {
+		fmt.Println("No tags found")
 	}
 
 	// For diary entries, extract weather only (description is no longer needed)
 	if config.DatabaseType == "diary" {
+		fmt.Println("Extracting weather for diary entry...")
 		// Extract weather
 		if weatherProp, ok := page.Properties["weather"]; ok {
 			if rtp, ok := weatherProp.(*notionapi.RichTextProperty); ok && len(rtp.RichText) > 0 {
 				frontmatter.Weather = rtp.RichText[0].PlainText
+				fmt.Printf("Weather: %s\n", frontmatter.Weather)
+			} else {
+				fmt.Println("No weather text found")
 			}
+		} else {
+			fmt.Println("No weather property found")
 		}
 	}
 
@@ -393,15 +415,19 @@ func processPage(client *notionapi.Client, page notionapi.Page, config Config) {
 	frontmatter.Date = page.CreatedTime.Format("2006-01-02")
 
 	// Retrieve page content
+	fmt.Printf("Retrieving content for page %s...\n", page.ID)
 	pageContent, err := retrievePageContent(client, page.ID, config)
 	if err != nil {
-		log.Printf("Failed to retrieve content for page %s: %v", page.ID, err)
+		fmt.Printf("Failed to retrieve content for page %s: %v\n", page.ID, err)
 		// If we can't retrieve the content, use a placeholder
 		pageContent = "This content was imported from Notion, but the content could not be retrieved."
+	} else {
+		fmt.Printf("Successfully retrieved content for page %s\n", page.ID)
 	}
 
 	// For blog entries, set description as first 70 characters of content with newlines converted to spaces
 	if config.DatabaseType == "blog" && pageContent != "" {
+		fmt.Println("Generating description for blog entry...")
 		// Replace newlines with spaces
 		descriptionText := strings.ReplaceAll(pageContent, "\n", " ")
 		// Remove extra spaces
@@ -417,43 +443,56 @@ func processPage(client *notionapi.Client, page notionapi.Page, config Config) {
 		runes := []rune(descriptionText)
 		if len(runes) > 70 {
 			frontmatter.Description = string(runes[:70]) + "..."
+			fmt.Printf("Generated description (truncated): %s\n", frontmatter.Description)
 		} else {
 			frontmatter.Description = descriptionText
+			fmt.Printf("Generated description: %s\n", frontmatter.Description)
 		}
 	} else if config.DatabaseType == "blog" {
 		log.Printf("Not setting description for blog entry: %s (empty content)", title)
 	}
 
 	// Generate frontmatter YAML
+	log.Println("Generating frontmatter YAML...")
 	frontmatterYAML, err := generateFrontmatterYAML(frontmatter)
 	if err != nil {
 		log.Printf("Failed to generate frontmatter for page %s: %v", page.ID, err)
 		return
 	}
+	log.Println("Frontmatter generated successfully")
 
 	// Create content with frontmatter
+	log.Println("Creating content with frontmatter...")
 	content := fmt.Sprintf("---\n%s---\n\n%s", frontmatterYAML, pageContent)
 
 	// Process empty lines: remove single empty lines, but keep one if there are multiple consecutive empty lines
+	log.Println("Processing empty lines...")
 	content = processEmptyLines(content)
 
 	// Save to file
+	log.Println("Generating filename...")
 	filename := generateFilename(page)
+	log.Printf("Generated filename: %s", filename)
 
 	// For diary entries, add the date at the beginning of the filename
 	if config.DatabaseType == "diary" && frontmatter.Date != "" {
+		log.Println("Adding date prefix to diary filename...")
 		// Extract just the filename without extension
 		filenameWithoutExt := strings.TrimSuffix(filename, filepath.Ext(filename))
 		// Create new filename with date prefix
 		filename = frontmatter.Date + "_" + filenameWithoutExt + filepath.Ext(filename)
+		log.Printf("Updated filename with date prefix: %s", filename)
 	}
 
 	// Determine the output directory based on database type
+	log.Println("Determining output directory...")
 	var outputDir string
 	if config.DatabaseType == "blog" {
 		outputDir = config.BlogOutputDir
+		log.Printf("Using blog output directory: %s", outputDir)
 	} else if config.DatabaseType == "diary" {
 		outputDir = config.DiaryOutputDir
+		log.Printf("Using diary output directory: %s", outputDir)
 	} else {
 		// Fallback behavior for unknown database types
 		var subDir string
@@ -463,20 +502,24 @@ func processPage(client *notionapi.Client, page notionapi.Page, config Config) {
 			subDir = "diary"
 		}
 		outputDir = filepath.Join("./content", subDir)
+		log.Printf("Using fallback output directory: %s", outputDir)
 	}
 
 	// Create the directory if it doesn't exist
+	log.Printf("Ensuring output directory exists: %s", outputDir)
 	if err := os.MkdirAll(outputDir, 0755); err != nil {
 		log.Printf("Failed to create output directory %s: %v", outputDir, err)
 		return
 	}
 
 	outputPath := filepath.Join(outputDir, filename)
+	log.Printf("Saving content to file: %s", outputPath)
 	if err := os.WriteFile(outputPath, []byte(content), 0644); err != nil {
 		log.Printf("Failed to write article to file %s: %v", outputPath, err)
 		return
 	}
 
+	log.Printf("Successfully converted article: %s", outputPath)
 	fmt.Printf("Successfully converted article: %s\n", outputPath)
 }
 
@@ -498,7 +541,8 @@ func fetchDatabase(config Config) (*notionapi.Client, []notionapi.Page) {
 	// Fetch database
 	database, err := client.Database.Get(context.Background(), notionapi.DatabaseID(databaseID))
 	if err != nil {
-		log.Fatalf("Failed to get database: %v", err)
+		fmt.Printf("Failed to get database: %v\n", err)
+		os.Exit(1)
 	}
 
 	fmt.Printf("Found database: %s\n", database.Title[0].PlainText)
@@ -524,7 +568,8 @@ func fetchDatabase(config Config) (*notionapi.Client, []notionapi.Page) {
 
 	resp, err := client.Database.Query(context.Background(), notionapi.DatabaseID(databaseID), query)
 	if err != nil {
-		log.Fatalf("Failed to query database: %v", err)
+		fmt.Printf("Failed to query database: %v\n", err)
+		os.Exit(1)
 	}
 
 	fmt.Printf("Found %d articles in Notion database\n", len(resp.Results))
@@ -558,27 +603,33 @@ func loadConfig() Config {
 
 	// Validate configuration
 	if config.NotionAPIToken == "" {
-		log.Fatal("NOTION_API_TOKEN environment variable is required")
+		fmt.Println("NOTION_API_TOKEN environment variable is required")
+		os.Exit(1)
 	}
 
 	// Validate database ID based on the selected type
 	if config.DatabaseType == "blog" {
 		if config.NotionBlogDatabaseID == "" {
-			log.Fatal("NOTION_BLOG_DATABASE_ID environment variable is required for blog database")
+			fmt.Println("NOTION_BLOG_DATABASE_ID environment variable is required for blog database")
+			os.Exit(1)
 		}
 	} else if config.DatabaseType == "diary" {
 		if config.NotionDiaryDatabaseID == "" {
-			log.Fatal("NOTION_DIARY_DATABASE_ID environment variable is required for diary database")
+			fmt.Println("NOTION_DIARY_DATABASE_ID environment variable is required for diary database")
+			os.Exit(1)
 		}
 	} else if config.DatabaseType == "all" {
 		if config.NotionBlogDatabaseID == "" {
-			log.Fatal("NOTION_BLOG_DATABASE_ID environment variable is required for 'all' mode")
+			fmt.Println("NOTION_BLOG_DATABASE_ID environment variable is required for 'all' mode")
+			os.Exit(1)
 		}
 		if config.NotionDiaryDatabaseID == "" {
-			log.Fatal("NOTION_DIARY_DATABASE_ID environment variable is required for 'all' mode")
+			fmt.Println("NOTION_DIARY_DATABASE_ID environment variable is required for 'all' mode")
+			os.Exit(1)
 		}
 	} else {
-		log.Fatalf("Invalid database type: %s. Must be 'blog', 'diary', or 'all'", config.DatabaseType)
+		fmt.Printf("Invalid database type: %s. Must be 'blog', 'diary', or 'all'\n", config.DatabaseType)
+		os.Exit(1)
 	}
 
 	return config
@@ -586,28 +637,41 @@ func loadConfig() Config {
 
 // processDatabaseType processes a specific database type
 func processDatabaseType(config Config, dbType string) {
+	log.Printf("Processing database type: %s", dbType)
+
 	// Create a copy of the config with the specified database type
 	dbConfig := config
 	dbConfig.DatabaseType = dbType
+	log.Println("Created database-specific configuration")
 
 	// Fetch database and pages
+	log.Println("Fetching database and pages...")
 	client, pages := fetchDatabase(dbConfig)
+	log.Printf("Fetched %d pages from database", len(pages))
 
 	// Process each article
-	for _, page := range pages {
+	log.Println("Processing pages...")
+	for i, page := range pages {
+		log.Printf("Processing page %d of %d (ID: %s)", i+1, len(pages), page.ID)
 		processPage(client, page, dbConfig)
 	}
+
+	log.Printf("Completed processing database type: %s", dbType)
 }
 
 // downloadImage downloads an image from a URL, compresses it, and saves it to the specified directory
 // Returns the local path to the image
 func downloadImage(imageURL, outputDir, pageID string) (string, error) {
+	log.Printf("Downloading image from URL: %s", imageURL)
+
 	// Create a hash of the URL to use as the filename
 	hasher := sha256.New()
 	hasher.Write([]byte(imageURL))
 	hash := hex.EncodeToString(hasher.Sum(nil))[:16] // Use first 16 chars of hash
+	log.Printf("Generated hash for image: %s", hash)
 
 	// Extract file extension from URL
+	log.Println("Extracting file extension...")
 	urlParts := strings.Split(imageURL, ".")
 	ext := "jpg" // Default extension
 	if len(urlParts) > 1 {
@@ -620,71 +684,95 @@ func downloadImage(imageURL, outputDir, pageID string) (string, error) {
 
 	// Normalize extension to lowercase
 	ext = strings.ToLower(ext)
+	log.Printf("Using file extension: %s", ext)
 
 	// Create a filename with page ID for better organization
 	filename := fmt.Sprintf("%s_%s.%s", pageID, hash, ext)
 	outputPath := filepath.Join(outputDir, filename)
+	log.Printf("Output path for image: %s", outputPath)
 
 	// Check if file already exists
 	if _, err := os.Stat(outputPath); err == nil {
 		// File exists, return the path
+		log.Printf("Image already exists at: %s", outputPath)
 		return filename, nil
 	}
 
 	// Create a client with timeout
+	log.Println("Creating HTTP client with timeout...")
 	client := &http.Client{
 		Timeout: 30 * time.Second,
 	}
 
 	// Download the image
+	log.Println("Downloading image...")
 	resp, err := client.Get(imageURL)
 	if err != nil {
+		log.Printf("Error downloading image: %v", err)
 		return "", fmt.Errorf("failed to download image: %v", err)
 	}
 	defer resp.Body.Close()
 
 	// Check if the response is successful
 	if resp.StatusCode != http.StatusOK {
+		log.Printf("Error: HTTP status code %d when downloading image", resp.StatusCode)
 		return "", fmt.Errorf("failed to download image, status code: %d", resp.StatusCode)
 	}
+	log.Println("Image downloaded successfully")
 
 	// Decode the image
-	img, _, err := image.Decode(resp.Body)
+	log.Println("Decoding image...")
+	img, imgFormat, err := image.Decode(resp.Body)
 	if err != nil {
+		log.Printf("Error decoding image: %v", err)
 		return "", fmt.Errorf("failed to decode image: %v", err)
 	}
+	log.Printf("Image decoded successfully (format: %s)", imgFormat)
 
 	// Create the output file
+	log.Printf("Creating output file: %s", outputPath)
 	out, err := os.Create(outputPath)
 	if err != nil {
+		log.Printf("Error creating output file: %v", err)
 		return "", fmt.Errorf("failed to create output file: %v", err)
 	}
 	defer out.Close()
 
 	// Compress and save the image based on its type
+	log.Printf("Compressing and saving image as %s...", ext)
 	switch ext {
 	case "jpg", "jpeg":
 		// Compress JPEG with quality 50 (0-100, higher is better quality but larger file)
+		log.Println("Using JPEG compression with quality 50")
 		err = jpeg.Encode(out, img, &jpeg.Options{Quality: 50})
 	case "png":
 		// Compress PNG with best compression
+		log.Println("Using PNG best compression")
 		encoder := png.Encoder{CompressionLevel: png.BestCompression}
 		err = encoder.Encode(out, img)
 	default:
 		// For other formats, just copy the original image data
+		log.Printf("Using direct copy for format: %s", ext)
 		// We need to re-download since we already consumed the response body
+		log.Println("Re-downloading image for direct copy...")
 		respNew, errGet := client.Get(imageURL)
 		if errGet != nil {
+			log.Printf("Error re-downloading image: %v", errGet)
 			return "", fmt.Errorf("failed to re-download image: %v", errGet)
 		}
 		defer respNew.Body.Close()
-		_, err = io.Copy(out, respNew.Body)
+		bytesWritten, err := io.Copy(out, respNew.Body)
+		if err == nil {
+			log.Printf("Copied %d bytes to output file", bytesWritten)
+		}
 	}
 
 	if err != nil {
+		log.Printf("Error saving compressed image: %v", err)
 		return "", fmt.Errorf("failed to save compressed image: %v", err)
 	}
 
+	log.Printf("Image successfully saved to: %s", outputPath)
 	return filename, nil
 }
 
@@ -695,18 +783,21 @@ func main() {
 	// Create output directories if they don't exist
 	if config.DatabaseType == "all" || config.DatabaseType == "blog" {
 		if err := os.MkdirAll(config.BlogOutputDir, 0755); err != nil {
-			log.Fatalf("Failed to create blog output directory: %v", err)
+			fmt.Printf("Failed to create blog output directory: %v\n", err)
+			os.Exit(1)
 		}
 	}
 	if config.DatabaseType == "all" || config.DatabaseType == "diary" {
 		if err := os.MkdirAll(config.DiaryOutputDir, 0755); err != nil {
-			log.Fatalf("Failed to create diary output directory: %v", err)
+			fmt.Printf("Failed to create diary output directory: %v\n", err)
+			os.Exit(1)
 		}
 	}
 
 	// Create images directory if it doesn't exist
 	if err := os.MkdirAll(config.ImagesDir, 0755); err != nil {
-		log.Fatalf("Failed to create images directory: %v", err)
+		fmt.Printf("Failed to create images directory: %v\n", err)
+		os.Exit(1)
 	}
 
 	if config.DatabaseType == "all" {
